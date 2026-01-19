@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+flipswitch/__init__.py
+flipswitch/provider.py
+flipswitch/sse_client.py
+flipswitch/types.py
+flipswitch_sdk.egg-info/PKG-INFO
+flipswitch_sdk.egg-info/SOURCES.txt
+flipswitch_sdk.egg-info/dependency_links.txt
+flipswitch_sdk.egg-info/requires.txt
+flipswitch_sdk.egg-info/top_level.txt
+tests/test_provider.py
