@@ -19,7 +19,7 @@ from flipswitch.types import FlagChangeEvent, FlagEvaluation
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BASE_URL = "https://api.flipswitch.dev"
+DEFAULT_BASE_URL = "https://api.flipswitch.io"
 
 
 class FlipswitchProvider(AbstractProvider):

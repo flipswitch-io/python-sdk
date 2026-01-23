@@ -4,7 +4,7 @@ Version: 0.1.0
 Summary: Flipswitch SDK with real-time SSE support for OpenFeature
 License: MIT
 Project-URL: Homepage, https://github.com/flipswitch-dev/flipswitch
-Project-URL: Documentation, https://flipswitch.dev/docs/sdks/python
+Project-URL: Documentation, https://flipswitch.io/docs/sdks/python
 Project-URL: Repository, https://github.com/flipswitch-dev/flipswitch
 Keywords: feature-flags,openfeature,flipswitch,sse,real-time
 Classifier: Development Status :: 4 - Beta
@@ -61,13 +61,13 @@ welcome_message = client.get_string_value("welcome-message", "Hello!")
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `api_key` | `str` | *required* | Environment API key from dashboard |
-| `base_url` | `str` | `https://api.flipswitch.dev` | Your Flipswitch server URL |
+| `base_url` | `str` | `https://api.flipswitch.io` | Your Flipswitch server URL |
 | `enable_realtime` | `bool` | `True` | Enable SSE for real-time flag updates |
 
 ```python
 provider = FlipswitchProvider(
     api_key="YOUR_API_KEY",
-    base_url="https://api.flipswitch.dev",
+    base_url="https://api.flipswitch.io",
     enable_realtime=True,
 )
 ```

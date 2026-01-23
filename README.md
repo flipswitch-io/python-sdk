@@ -32,13 +32,13 @@ welcome_message = client.get_string_value("welcome-message", "Hello!")
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `api_key` | `str` | *required* | Environment API key from dashboard |
-| `base_url` | `str` | `https://api.flipswitch.dev` | Your Flipswitch server URL |
+| `base_url` | `str` | `https://api.flipswitch.io` | Your Flipswitch server URL |
 | `enable_realtime` | `bool` | `True` | Enable SSE for real-time flag updates |
 
 ```python
 provider = FlipswitchProvider(
     api_key="YOUR_API_KEY",
-    base_url="https://api.flipswitch.dev",
+    base_url="https://api.flipswitch.io",
     enable_realtime=True,
 )
 ```

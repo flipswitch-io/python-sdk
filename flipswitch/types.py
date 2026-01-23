@@ -17,7 +17,7 @@ class FlipswitchOptions:
     """
 
     api_key: str
-    base_url: str = "https://api.flipswitch.dev"
+    base_url: str = "https://api.flipswitch.io"
     enable_realtime: bool = True
 
 
