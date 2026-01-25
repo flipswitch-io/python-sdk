@@ -36,9 +36,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/flipswitch-dev/flipswitch"
+Homepage = "https://github.com/flipswitch-io/python-sdk"
 Documentation = "https://flipswitch.io/docs/sdks/python"
-Repository = "https://github.com/flipswitch-dev/flipswitch"
+Repository = "https://github.com/flipswitch-io/python-sdk"
 
 [tool.setuptools.packages.find]
 where = ["."]

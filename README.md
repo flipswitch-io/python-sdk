@@ -1,5 +1,8 @@
 # Flipswitch Python SDK
 
+[![CI](https://github.com/flipswitch-io/python-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/flipswitch-io/python-sdk/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/flipswitch-sdk.svg)](https://pypi.org/project/flipswitch-sdk/)
+
 Flipswitch SDK for Python with real-time SSE support for OpenFeature.
 
 ## Installation
@@ -123,6 +126,10 @@ pytest
 python examples/demo.py <api-key>
 ```
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
 ## License
 
-MIT
+MIT - see [LICENSE](LICENSE) for details.
