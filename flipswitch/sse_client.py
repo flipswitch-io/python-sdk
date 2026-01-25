@@ -28,6 +28,7 @@ class SseClient:
         api_key: str,
         on_flag_change: Callable[[FlagChangeEvent], None],
         on_status_change: Optional[Callable[[ConnectionStatus], None]] = None,
+        telemetry_headers: Optional[dict[str, str]] = None,
     ):
         """Create a new SSE client.
 
@@ -36,11 +37,13 @@ class SseClient:
             api_key: The environment API key.
             on_flag_change: Callback for flag change events.
             on_status_change: Callback for connection status changes.
+            telemetry_headers: Optional telemetry headers to send with SSE requests.
         """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.on_flag_change = on_flag_change
         self.on_status_change = on_status_change
+        self.telemetry_headers = telemetry_headers or {}
 
         self._status = ConnectionStatus.DISCONNECTED
         self._retry_delay = MIN_RETRY_DELAY
@@ -89,6 +92,8 @@ class SseClient:
             "Accept": "text/event-stream",
             "Cache-Control": "no-cache",
         }
+        # Add telemetry headers
+        headers.update(self.telemetry_headers)
 
         with httpx.Client(timeout=None) as client:
             with client.stream("GET", url, headers=headers) as response:

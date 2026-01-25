@@ -208,13 +208,26 @@ class FlipswitchProvider(AbstractProvider):
 
     def _start_sse_connection(self) -> None:
         """Start the SSE connection for real-time updates."""
+        telemetry_headers = self._get_telemetry_headers_dict()
         self._sse_client = SseClient(
             base_url=self._base_url,
             api_key=self._api_key,
             on_flag_change=self._handle_flag_change,
             on_status_change=self._handle_status_change,
+            telemetry_headers=telemetry_headers,
         )
         self._sse_client.connect()
+
+    def _get_telemetry_headers_dict(self) -> dict[str, str]:
+        """Get telemetry headers as a dictionary."""
+        if not self._enable_telemetry:
+            return {}
+        return {
+            "X-Flipswitch-SDK": self._get_telemetry_sdk_header(),
+            "X-Flipswitch-Runtime": self._get_telemetry_runtime_header(),
+            "X-Flipswitch-OS": self._get_telemetry_os_header(),
+            "X-Flipswitch-Features": self._get_telemetry_features_header(),
+        }
 
     def _handle_flag_change(self, event: FlagChangeEvent) -> None:
         """Handle a flag change event from SSE."""
