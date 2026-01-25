@@ -2,6 +2,8 @@
 
 import json
 import logging
+import platform
+import sys
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import httpx
@@ -20,6 +22,7 @@ from flipswitch.types import FlagChangeEvent, FlagEvaluation
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.flipswitch.io"
+SDK_VERSION = "0.1.0"
 
 
 class FlipswitchProvider(AbstractProvider):
@@ -46,6 +49,7 @@ class FlipswitchProvider(AbstractProvider):
         api_key: str,
         base_url: str = DEFAULT_BASE_URL,
         enable_realtime: bool = True,
+        enable_telemetry: bool = True,
         http_client: Optional[httpx.Client] = None,
     ):
         """Create a new FlipswitchProvider.
@@ -54,6 +58,9 @@ class FlipswitchProvider(AbstractProvider):
             api_key: The environment API key (required).
             base_url: The Flipswitch server base URL.
             enable_realtime: Enable SSE for real-time flag updates.
+            enable_telemetry: Enable telemetry collection. When enabled, the SDK sends
+                usage statistics (SDK version, runtime version, OS, architecture) to
+                help improve the service. No personal data is collected. Defaults to True.
             http_client: Custom HTTP client (optional).
 
         Raises:
@@ -65,6 +72,7 @@ class FlipswitchProvider(AbstractProvider):
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._enable_realtime = enable_realtime
+        self._enable_telemetry = enable_telemetry
         self._http_client = http_client or httpx.Client()
         self._owns_http_client = http_client is None
 
@@ -75,8 +83,53 @@ class FlipswitchProvider(AbstractProvider):
         # Create underlying OFREP provider for flag evaluation
         self._ofrep_provider = OFREPProvider(
             base_url=f"{self._base_url}/ofrep/v1",
-            headers_factory=lambda: {"X-API-Key": self._api_key},
+            headers_factory=self._get_headers,
         )
+
+    def _get_telemetry_sdk_header(self) -> str:
+        """Get SDK telemetry header value."""
+        return f"python/{SDK_VERSION}"
+
+    def _get_telemetry_runtime_header(self) -> str:
+        """Get runtime telemetry header value."""
+        return f"python/{platform.python_version()}"
+
+    def _get_telemetry_os_header(self) -> str:
+        """Get OS telemetry header value."""
+        os_name = platform.system().lower()
+        arch = platform.machine().lower()
+
+        # Normalize OS name
+        if os_name == "darwin":
+            os_name = "darwin"
+        elif os_name == "windows":
+            os_name = "windows"
+        elif os_name == "linux":
+            os_name = "linux"
+
+        # Normalize architecture
+        if arch in ("x86_64", "amd64"):
+            arch = "amd64"
+        elif arch in ("aarch64", "arm64"):
+            arch = "arm64"
+
+        return f"{os_name}/{arch}"
+
+    def _get_telemetry_features_header(self) -> str:
+        """Get features telemetry header value."""
+        return f"sse={str(self._enable_realtime).lower()}"
+
+    def _get_headers(self) -> Dict[str, str]:
+        """Get headers for HTTP requests."""
+        headers = {"X-API-Key": self._api_key}
+
+        if self._enable_telemetry:
+            headers["X-Flipswitch-SDK"] = self._get_telemetry_sdk_header()
+            headers["X-Flipswitch-Runtime"] = self._get_telemetry_runtime_header()
+            headers["X-Flipswitch-OS"] = self._get_telemetry_os_header()
+            headers["X-Flipswitch-Features"] = self._get_telemetry_features_header()
+
+        return headers
 
     def get_metadata(self) -> Metadata:
         """Get provider metadata."""
@@ -115,7 +168,7 @@ class FlipswitchProvider(AbstractProvider):
         url = f"{self._base_url}/ofrep/v1/evaluate/flags"
         headers = {
             "Content-Type": "application/json",
-            "X-API-Key": self._api_key,
+            **self._get_headers(),
         }
         body = {"context": {"targetingKey": "_init_"}}
 
@@ -345,7 +398,7 @@ class FlipswitchProvider(AbstractProvider):
             url = f"{self._base_url}/ofrep/v1/evaluate/flags"
             headers = {
                 "Content-Type": "application/json",
-                "X-API-Key": self._api_key,
+                **self._get_headers(),
             }
             body = {"context": self._transform_context(context)}
 
@@ -395,7 +448,7 @@ class FlipswitchProvider(AbstractProvider):
             url = f"{self._base_url}/ofrep/v1/evaluate/flags/{flag_key}"
             headers = {
                 "Content-Type": "application/json",
-                "X-API-Key": self._api_key,
+                **self._get_headers(),
             }
             body = {"context": self._transform_context(context)}
 

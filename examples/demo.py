@@ -3,9 +3,13 @@
 Sample application demonstrating Flipswitch integration with real-time SSE support.
 
 Run this demo with:
-    python examples/demo.py <api-key>
+    python examples/demo.py <api-key> [base-url]
+
+Or set the FLIPSWITCH_BASE_URL environment variable:
+    FLIPSWITCH_BASE_URL=http://localhost:8080 python examples/demo.py <api-key>
 """
 
+import os
 import sys
 import time
 from typing import List
@@ -18,17 +22,28 @@ from flipswitch import FlipswitchProvider, FlagEvaluation, FlagChangeEvent
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python demo.py <api-key>", file=sys.stderr)
+        print("Usage: python demo.py <api-key> [base-url]", file=sys.stderr)
+        print("       Or set FLIPSWITCH_BASE_URL environment variable", file=sys.stderr)
         sys.exit(1)
 
     api_key = sys.argv[1]
+
+    # Get base URL from command line or environment variable
+    base_url = None
+    if len(sys.argv) >= 3:
+        base_url = sys.argv[2]
+    elif os.environ.get("FLIPSWITCH_BASE_URL"):
+        base_url = os.environ["FLIPSWITCH_BASE_URL"]
 
     print("Flipswitch Python SDK Demo")
     print("=" * 26)
     print()
 
+    if base_url:
+        print(f"Using base URL: {base_url}")
+
     # API key is required, all other options have sensible defaults
-    provider = FlipswitchProvider(api_key=api_key)
+    provider = FlipswitchProvider(api_key=api_key, base_url=base_url)
 
     # Register the provider with OpenFeature
     try:
