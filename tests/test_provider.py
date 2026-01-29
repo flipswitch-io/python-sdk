@@ -362,3 +362,34 @@ class TestBuilder:
         # If we get here without exception, the custom baseUrl was used
         assert provider.get_metadata().name == "flipswitch"
         provider.shutdown()
+
+
+# ========================================
+# URL Path Tests
+# ========================================
+
+
+class TestUrlPath:
+    """Test that OFREP requests use correct paths."""
+
+    def test_ofrep_requests_should_use_correct_path(self, mock_server: HTTPServer):
+        """Verify requests don't have duplicated /ofrep/v1 path segments."""
+        setup_bulk_response(mock_server, {"flags": []})
+        setup_flag_response(mock_server, "test-flag", {
+            "key": "test-flag",
+            "value": True,
+        })
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        # Trigger a single flag evaluation
+        provider.evaluate_flag("test-flag", EvaluationContext())
+
+        # Check the request log to verify correct path
+        requests = mock_server.log
+        flag_request = [r for r in requests if "test-flag" in r[0].path]
+
+        assert len(flag_request) > 0, "Expected flag evaluation request"
+        assert flag_request[0][0].path == "/ofrep/v1/evaluate/flags/test-flag"
+        provider.shutdown()

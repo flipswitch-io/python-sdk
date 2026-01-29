@@ -76,8 +76,9 @@ class FlipswitchProvider(AbstractProvider):
         self._initialized = False
 
         # Create underlying OFREP provider for flag evaluation
+        # Note: OFREPProvider automatically appends /ofrep/v1 to the base_url
         self._ofrep_provider = OFREPProvider(
-            base_url=f"{self._base_url}/ofrep/v1",
+            base_url=self._base_url,
             headers_factory=self._get_headers,
         )
 
