@@ -137,15 +137,15 @@ class SseClient:
                 # Single flag was modified
                 parsed = json.loads(data)
                 event = FlagChangeEvent(
-                    flag_key=parsed.get("flagKey"),
-                    timestamp=parsed.get("timestamp", ""),
+                    flag_key=parsed["flagKey"],
+                    timestamp=parsed["timestamp"],
                 )
                 logger.debug(f"Flag updated event: {event}")
                 self.on_flag_change(event)
             elif event_type == "config-updated":
                 # Configuration changed, need to refresh all flags
                 parsed = json.loads(data)
-                reason = parsed.get("reason", "unknown")
+                reason = parsed["reason"]
 
                 # Log warning for api-key-rotated
                 if reason == "api-key-rotated":
@@ -155,7 +155,7 @@ class SseClient:
 
                 event = FlagChangeEvent(
                     flag_key=None,  # None indicates all flags should be refreshed
-                    timestamp=parsed.get("timestamp", ""),
+                    timestamp=parsed["timestamp"],
                 )
                 logger.debug(f"Config updated event (reason={reason}): {event}")
                 self.on_flag_change(event)
@@ -164,7 +164,7 @@ class SseClient:
                 parsed = json.loads(data)
                 event = FlagChangeEvent(
                     flag_key=parsed.get("flagKey"),
-                    timestamp=parsed.get("timestamp", ""),
+                    timestamp=parsed["timestamp"],
                 )
                 logger.debug(f"Flag change event: {event}")
                 self.on_flag_change(event)
