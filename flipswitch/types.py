@@ -22,8 +22,46 @@ class FlipswitchOptions:
 
 
 @dataclass
+class FlagUpdatedEvent:
+    """Event emitted when a single flag is updated.
+
+    Attributes:
+        flag_key: The key of the flag that changed.
+        timestamp: ISO timestamp of when the change occurred.
+    """
+
+    flag_key: str
+    timestamp: str
+
+    def get_timestamp_as_datetime(self) -> Optional[datetime]:
+        """Get the timestamp as a datetime object."""
+        if self.timestamp:
+            return datetime.fromisoformat(self.timestamp.replace("Z", "+00:00"))
+        return None
+
+
+@dataclass
+class ConfigUpdatedEvent:
+    """Event emitted when configuration changes that may affect multiple flags.
+
+    Attributes:
+        reason: The reason for the configuration update (e.g., 'segment-modified', 'api-key-rotated').
+        timestamp: ISO timestamp of when the change occurred.
+    """
+
+    reason: str
+    timestamp: str
+
+    def get_timestamp_as_datetime(self) -> Optional[datetime]:
+        """Get the timestamp as a datetime object."""
+        if self.timestamp:
+            return datetime.fromisoformat(self.timestamp.replace("Z", "+00:00"))
+        return None
+
+
+@dataclass
 class FlagChangeEvent:
-    """Event emitted when a flag changes.
+    """Event emitted when a flag changes (legacy format, used internally).
 
     Attributes:
         flag_key: The key of the flag that changed, or None for bulk invalidation.

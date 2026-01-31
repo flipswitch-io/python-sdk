@@ -25,6 +25,8 @@ from flipswitch.sse_client import SseClient, ConnectionStatus
 from flipswitch.types import (
     FlipswitchOptions,
     FlagChangeEvent,
+    FlagUpdatedEvent,
+    ConfigUpdatedEvent,
     FlagEvaluation,
 )
 
@@ -34,6 +36,8 @@ __all__ = [
     "ConnectionStatus",
     "FlipswitchOptions",
     "FlagChangeEvent",
+    "FlagUpdatedEvent",
+    "ConfigUpdatedEvent",
     "FlagEvaluation",
 ]
 

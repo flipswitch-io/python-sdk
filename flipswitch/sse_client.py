@@ -132,17 +132,44 @@ class SseClient:
             logger.debug("Heartbeat received")
             return
 
-        if event_type == "flag-change":
-            try:
+        try:
+            if event_type == "flag-updated":
+                # Single flag was modified
+                parsed = json.loads(data)
+                event = FlagChangeEvent(
+                    flag_key=parsed["flagKey"],
+                    timestamp=parsed["timestamp"],
+                )
+                logger.debug(f"Flag updated event: {event}")
+                self.on_flag_change(event)
+            elif event_type == "config-updated":
+                # Configuration changed, need to refresh all flags
+                parsed = json.loads(data)
+                reason = parsed["reason"]
+
+                # Log warning for api-key-rotated
+                if reason == "api-key-rotated":
+                    logger.warning(
+                        "API key has been rotated. You may need to update your API key configuration."
+                    )
+
+                event = FlagChangeEvent(
+                    flag_key=None,  # None indicates all flags should be refreshed
+                    timestamp=parsed["timestamp"],
+                )
+                logger.debug(f"Config updated event (reason={reason}): {event}")
+                self.on_flag_change(event)
+            elif event_type == "flag-change":
+                # Legacy event format for backward compatibility
                 parsed = json.loads(data)
                 event = FlagChangeEvent(
                     flag_key=parsed.get("flagKey"),
-                    timestamp=parsed.get("timestamp", ""),
+                    timestamp=parsed["timestamp"],
                 )
                 logger.debug(f"Flag change event: {event}")
                 self.on_flag_change(event)
-            except Exception as e:
-                logger.error(f"Failed to parse flag-change event: {e}")
+        except Exception as e:
+            logger.error(f"Failed to parse {event_type} event: {e}")
 
     def _schedule_reconnect(self) -> None:
         """Schedule a reconnection attempt with exponential backoff."""
