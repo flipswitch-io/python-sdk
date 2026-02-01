@@ -78,7 +78,7 @@ class SseClient:
                 self._connect()
             except Exception as e:
                 if not self._closed:
-                    logger.error(f"SSE connection error: {e}")
+                    logger.warning(f"SSE connection error: {e}")
                     self._update_status(ConnectionStatus.ERROR)
                     self._schedule_reconnect()
 
@@ -143,31 +143,25 @@ class SseClient:
                 logger.debug(f"Flag updated event: {event}")
                 self.on_flag_change(event)
             elif event_type == "config-updated":
-                # Configuration changed, need to refresh all flags
+                # Configuration changed, always refresh all flags
                 parsed = json.loads(data)
-                reason = parsed["reason"]
-
-                # Log warning for api-key-rotated
-                if reason == "api-key-rotated":
-                    logger.warning(
-                        "API key has been rotated. You may need to update your API key configuration."
-                    )
-
                 event = FlagChangeEvent(
                     flag_key=None,  # None indicates all flags should be refreshed
                     timestamp=parsed["timestamp"],
                 )
-                logger.debug(f"Config updated event (reason={reason}): {event}")
+                logger.debug(f"Config updated event: {event}")
                 self.on_flag_change(event)
-            elif event_type == "flag-change":
-                # Legacy event format for backward compatibility
+            elif event_type == "api-key-rotated":
+                # API key was rotated or rotation was aborted
                 parsed = json.loads(data)
-                event = FlagChangeEvent(
-                    flag_key=parsed.get("flagKey"),
-                    timestamp=parsed["timestamp"],
-                )
-                logger.debug(f"Flag change event: {event}")
-                self.on_flag_change(event)
+                valid_until = parsed.get("validUntil")
+                if not valid_until:
+                    logger.info("API key rotation was aborted")
+                else:
+                    logger.warning(
+                        f"API key was rotated. Current key valid until: {valid_until}"
+                    )
+                # No cache invalidation - this is just informational
         except Exception as e:
             logger.error(f"Failed to parse {event_type} event: {e}")
 

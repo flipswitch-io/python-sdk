@@ -4,6 +4,7 @@ import json
 import logging
 import platform
 import sys
+import threading
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import httpx
@@ -22,7 +23,9 @@ from flipswitch.types import FlagChangeEvent, FlagEvaluation
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.flipswitch.io"
-SDK_VERSION = "0.1.0"
+SDK_VERSION = "0.1.1"
+DEFAULT_POLLING_INTERVAL = 30.0  # seconds
+DEFAULT_MAX_SSE_RETRIES = 5
 
 
 class FlipswitchProvider(AbstractProvider):
@@ -50,6 +53,9 @@ class FlipswitchProvider(AbstractProvider):
         base_url: str = DEFAULT_BASE_URL,
         enable_realtime: bool = True,
         http_client: Optional[httpx.Client] = None,
+        enable_polling_fallback: bool = True,
+        polling_interval: float = DEFAULT_POLLING_INTERVAL,
+        max_sse_retries: int = DEFAULT_MAX_SSE_RETRIES,
     ):
         """Create a new FlipswitchProvider.
 
@@ -58,6 +64,9 @@ class FlipswitchProvider(AbstractProvider):
             base_url: The Flipswitch server base URL.
             enable_realtime: Enable SSE for real-time flag updates.
             http_client: Custom HTTP client (optional).
+            enable_polling_fallback: Enable polling fallback when SSE fails.
+            polling_interval: Polling interval in seconds (default: 30).
+            max_sse_retries: Max SSE retries before falling back to polling.
 
         Raises:
             ValueError: If api_key is not provided.
@@ -70,6 +79,15 @@ class FlipswitchProvider(AbstractProvider):
         self._enable_realtime = enable_realtime
         self._http_client = http_client or httpx.Client()
         self._owns_http_client = http_client is None
+
+        # Polling fallback configuration
+        self._enable_polling_fallback = enable_polling_fallback
+        self._polling_interval = polling_interval
+        self._max_sse_retries = max_sse_retries
+        self._sse_retry_count = 0
+        self._polling_active = False
+        self._polling_timer: Optional[threading.Timer] = None
+        self._polling_lock = threading.Lock()
 
         self._flag_change_listeners: List[Callable[[FlagChangeEvent], None]] = []
         self._sse_client: Optional[SseClient] = None
@@ -188,6 +206,9 @@ class FlipswitchProvider(AbstractProvider):
 
     def shutdown(self) -> None:
         """Shutdown the provider."""
+        # Stop polling if active
+        self._stop_polling()
+
         if self._sse_client:
             self._sse_client.close()
             self._sse_client = None
@@ -199,6 +220,53 @@ class FlipswitchProvider(AbstractProvider):
 
         self._initialized = False
         logger.info("Flipswitch provider shut down")
+
+    def _start_polling_fallback(self) -> None:
+        """Start polling fallback when SSE fails."""
+        with self._polling_lock:
+            if self._polling_active or not self._enable_polling_fallback:
+                return
+
+            logger.info(f"Starting polling fallback (interval: {self._polling_interval}s)")
+            self._polling_active = True
+            self._schedule_poll()
+
+    def _schedule_poll(self) -> None:
+        """Schedule the next poll."""
+        if not self._polling_active:
+            return
+
+        self._polling_timer = threading.Timer(self._polling_interval, self._poll_flags)
+        self._polling_timer.daemon = True
+        self._polling_timer.start()
+
+    def _poll_flags(self) -> None:
+        """Poll for flag updates."""
+        if not self._polling_active:
+            return
+
+        try:
+            # Invalidate OFREP cache to force refresh on next evaluation
+            if hasattr(self._ofrep_provider, "_cache"):
+                self._ofrep_provider._cache.clear()
+            logger.debug("Polling: refreshed flag cache")
+        except Exception as e:
+            logger.warning(f"Polling refresh failed: {e}")
+
+        # Schedule next poll
+        self._schedule_poll()
+
+    def _stop_polling(self) -> None:
+        """Stop polling fallback."""
+        with self._polling_lock:
+            self._polling_active = False
+            if self._polling_timer:
+                self._polling_timer.cancel()
+                self._polling_timer = None
+
+    def is_polling_active(self) -> bool:
+        """Check if polling fallback is active."""
+        return self._polling_active
 
     def _start_sse_connection(self) -> None:
         """Start the SSE connection for real-time updates."""
@@ -222,7 +290,20 @@ class FlipswitchProvider(AbstractProvider):
         }
 
     def _handle_flag_change(self, event: FlagChangeEvent) -> None:
-        """Handle a flag change event from SSE."""
+        """Handle a flag change event from SSE.
+
+        Triggers OFREP cache refresh and notifies user listeners.
+        """
+        # Trigger OFREP provider to refresh its cache
+        # The OFREP provider's cache is invalidated by re-initializing
+        try:
+            # Call the provider's internal cache invalidation
+            if hasattr(self._ofrep_provider, "_cache"):
+                self._ofrep_provider._cache.clear()
+        except Exception as e:
+            # Log but don't fail - stale data is still usable
+            logger.warning(f"Failed to refresh flags after SSE event: {e}")
+
         # Notify user-registered listeners
         for listener in self._flag_change_listeners:
             try:
@@ -233,8 +314,24 @@ class FlipswitchProvider(AbstractProvider):
     def _handle_status_change(self, status: ConnectionStatus) -> None:
         """Handle SSE connection status change."""
         if status == ConnectionStatus.ERROR:
-            logger.warning("SSE connection error, provider is stale")
+            self._sse_retry_count += 1
+            logger.warning(f"SSE connection error (retry {self._sse_retry_count}), provider is stale")
+
+            # Check if we should fall back to polling
+            if self._sse_retry_count >= self._max_sse_retries and self._enable_polling_fallback:
+                logger.warning(
+                    f"SSE failed after {self._sse_retry_count} retries - falling back to polling"
+                )
+                self._start_polling_fallback()
+
         elif status == ConnectionStatus.CONNECTED:
+            # SSE connected - reset retry count and stop polling
+            self._sse_retry_count = 0
+
+            if self._polling_active:
+                logger.info("SSE reconnected - stopping polling fallback")
+                self._stop_polling()
+
             logger.info("SSE connection restored")
 
     def add_flag_change_listener(
