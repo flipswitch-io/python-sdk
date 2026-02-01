@@ -59,14 +59,14 @@ class ConfigUpdatedEvent:
 
 @dataclass
 class ApiKeyRotatedEvent:
-    """Event emitted when an API key has been rotated.
+    """Event emitted when an API key has been rotated or rotation was aborted.
 
     Attributes:
-        valid_until: ISO timestamp when the current key expires.
-        timestamp: ISO timestamp of when the rotation occurred.
+        valid_until: ISO timestamp when the current key expires, or None if aborted.
+        timestamp: ISO timestamp of when the event occurred.
     """
 
-    valid_until: str
+    valid_until: Optional[str]
     timestamp: str
 
     def get_valid_until_as_datetime(self) -> Optional[datetime]:

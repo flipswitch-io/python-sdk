@@ -152,13 +152,16 @@ class SseClient:
                 logger.debug(f"Config updated event: {event}")
                 self.on_flag_change(event)
             elif event_type == "api-key-rotated":
-                # API key was rotated - warning only, no cache invalidation
+                # API key was rotated or rotation was aborted
                 parsed = json.loads(data)
-                valid_until = parsed.get("validUntil", "unknown")
-                logger.warning(
-                    f"API key was rotated. Current key valid until: {valid_until}"
-                )
-                # No cache invalidation - this is just a warning
+                valid_until = parsed.get("validUntil")
+                if not valid_until:
+                    logger.info("API key rotation was aborted")
+                else:
+                    logger.warning(
+                        f"API key was rotated. Current key valid until: {valid_until}"
+                    )
+                # No cache invalidation - this is just informational
         except Exception as e:
             logger.error(f"Failed to parse {event_type} event: {e}")
 
