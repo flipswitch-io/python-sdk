@@ -45,12 +45,35 @@ class ConfigUpdatedEvent:
     """Event emitted when configuration changes that may affect multiple flags.
 
     Attributes:
-        reason: The reason for the configuration update (e.g., 'segment-modified', 'api-key-rotated').
         timestamp: ISO timestamp of when the change occurred.
     """
 
-    reason: str
     timestamp: str
+
+    def get_timestamp_as_datetime(self) -> Optional[datetime]:
+        """Get the timestamp as a datetime object."""
+        if self.timestamp:
+            return datetime.fromisoformat(self.timestamp.replace("Z", "+00:00"))
+        return None
+
+
+@dataclass
+class ApiKeyRotatedEvent:
+    """Event emitted when an API key has been rotated.
+
+    Attributes:
+        valid_until: ISO timestamp when the current key expires.
+        timestamp: ISO timestamp of when the rotation occurred.
+    """
+
+    valid_until: str
+    timestamp: str
+
+    def get_valid_until_as_datetime(self) -> Optional[datetime]:
+        """Get the valid_until as a datetime object."""
+        if self.valid_until:
+            return datetime.fromisoformat(self.valid_until.replace("Z", "+00:00"))
+        return None
 
     def get_timestamp_as_datetime(self) -> Optional[datetime]:
         """Get the timestamp as a datetime object."""
