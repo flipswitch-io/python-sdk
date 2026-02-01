@@ -78,7 +78,7 @@ class SseClient:
                 self._connect()
             except Exception as e:
                 if not self._closed:
-                    logger.error(f"SSE connection error: {e}")
+                    logger.warning(f"SSE connection error: {e}")
                     self._update_status(ConnectionStatus.ERROR)
                     self._schedule_reconnect()
 
