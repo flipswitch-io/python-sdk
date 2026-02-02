@@ -5,6 +5,7 @@ import logging
 import platform
 import sys
 import threading
+from importlib.metadata import version, PackageNotFoundError
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import httpx
@@ -23,7 +24,17 @@ from flipswitch.types import FlagChangeEvent, FlagEvaluation
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.flipswitch.io"
-SDK_VERSION = "0.1.1"
+
+
+def _get_sdk_version() -> str:
+    """Get SDK version from installed package metadata."""
+    try:
+        return version("flipswitch-sdk")
+    except PackageNotFoundError:
+        return "dev"
+
+
+SDK_VERSION = _get_sdk_version()
 DEFAULT_POLLING_INTERVAL = 30.0  # seconds
 DEFAULT_MAX_SSE_RETRIES = 5
 
