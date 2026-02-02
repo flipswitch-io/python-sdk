@@ -20,6 +20,8 @@ Example:
     >>> dark_mode = client.get_boolean_value("dark-mode", False)
 """
 
+from importlib.metadata import version, PackageNotFoundError
+
 from flipswitch.provider import FlipswitchProvider
 from flipswitch.sse_client import SseClient, ConnectionStatus
 from flipswitch.types import (
@@ -41,4 +43,13 @@ __all__ = [
     "FlagEvaluation",
 ]
 
-__version__ = "0.1.0"
+
+def _get_version() -> str:
+    """Get version from installed package metadata."""
+    try:
+        return version("flipswitch-sdk")
+    except PackageNotFoundError:
+        return "dev"
+
+
+__version__ = _get_version()
