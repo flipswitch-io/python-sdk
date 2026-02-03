@@ -690,7 +690,7 @@ class TestTelemetryHeaders:
     """Test telemetry header generation."""
 
     @staticmethod
-    def _get_header(headers: dict, name: str) -> str | None:
+    def _get_header(headers: dict, name: str):
         """Case-insensitive header lookup (werkzeug normalizes casing)."""
         lower = name.lower()
         for k, v in headers.items():
