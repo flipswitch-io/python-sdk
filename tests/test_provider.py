@@ -10,12 +10,17 @@ which has its own test suite.
 """
 
 import json
+import platform
+import threading
+import time
 import pytest
+import httpx
 from pytest_httpserver import HTTPServer
 
 from openfeature.evaluation_context import EvaluationContext
 
 from flipswitch import FlipswitchProvider, ConnectionStatus
+from flipswitch.types import FlagChangeEvent
 
 
 @pytest.fixture
@@ -393,3 +398,407 @@ class TestUrlPath:
         assert len(flag_request) > 0, "Expected flag evaluation request"
         assert flag_request[0][0].path == "/ofrep/v1/evaluate/flags/test-flag"
         provider.shutdown()
+
+
+# ========================================
+# Polling Fallback Tests
+# ========================================
+
+
+class TestPollingFallback:
+    """Test polling fallback behavior."""
+
+    def test_polling_activates_after_max_sse_retries(self, mock_server: HTTPServer):
+        """Polling activates after maxSseRetries error status changes."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = FlipswitchProvider(
+            api_key="test-api-key",
+            base_url=mock_server.url_for(""),
+            enable_realtime=False,
+            enable_polling_fallback=True,
+            max_sse_retries=3,
+        )
+        provider.initialize(EvaluationContext())
+
+        # Simulate SSE error status changes
+        for _ in range(3):
+            provider._handle_status_change(ConnectionStatus.ERROR)
+
+        assert provider.is_polling_active() is True
+        provider.shutdown()
+
+    def test_polling_deactivates_on_sse_reconnect(self, mock_server: HTTPServer):
+        """Polling stops when SSE reconnects."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = FlipswitchProvider(
+            api_key="test-api-key",
+            base_url=mock_server.url_for(""),
+            enable_realtime=False,
+            enable_polling_fallback=True,
+            max_sse_retries=2,
+        )
+        provider.initialize(EvaluationContext())
+
+        # Trigger polling
+        for _ in range(2):
+            provider._handle_status_change(ConnectionStatus.ERROR)
+        assert provider.is_polling_active() is True
+
+        # Simulate SSE reconnect
+        provider._handle_status_change(ConnectionStatus.CONNECTED)
+        assert provider.is_polling_active() is False
+        provider.shutdown()
+
+    def test_polling_disabled_when_enable_polling_fallback_false(self, mock_server: HTTPServer):
+        """Polling never activates when enablePollingFallback=False."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = FlipswitchProvider(
+            api_key="test-api-key",
+            base_url=mock_server.url_for(""),
+            enable_realtime=False,
+            enable_polling_fallback=False,
+            max_sse_retries=2,
+        )
+        provider.initialize(EvaluationContext())
+
+        # Simulate many SSE errors
+        for _ in range(10):
+            provider._handle_status_change(ConnectionStatus.ERROR)
+
+        assert provider.is_polling_active() is False
+        provider.shutdown()
+
+
+# ========================================
+# Flag Change Handling Tests
+# ========================================
+
+
+class TestFlagChangeHandling:
+    """Test flag change listener notification."""
+
+    def test_listener_notification_on_flag_change(self, mock_server: HTTPServer):
+        """Registered listeners receive flag change events."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        events = []
+        provider.add_flag_change_listener(lambda e: events.append(e))
+
+        event = FlagChangeEvent(flag_key="test-flag", timestamp="2024-01-01T00:00:00Z")
+        provider._handle_flag_change(event)
+
+        assert len(events) == 1
+        assert events[0].flag_key == "test-flag"
+        provider.shutdown()
+
+    def test_listener_error_isolation(self, mock_server: HTTPServer):
+        """One listener throwing doesn't prevent other listeners from being called."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        events = []
+
+        def bad_listener(event):
+            raise RuntimeError("listener error")
+
+        def good_listener(event):
+            events.append(event)
+
+        provider.add_flag_change_listener(bad_listener)
+        provider.add_flag_change_listener(good_listener)
+
+        event = FlagChangeEvent(flag_key="test", timestamp="2024-01-01T00:00:00Z")
+        provider._handle_flag_change(event)
+
+        assert len(events) == 1
+        provider.shutdown()
+
+    def test_multiple_listeners_all_called(self, mock_server: HTTPServer):
+        """All registered listeners are called on flag change."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        events1 = []
+        events2 = []
+        events3 = []
+
+        provider.add_flag_change_listener(lambda e: events1.append(e))
+        provider.add_flag_change_listener(lambda e: events2.append(e))
+        provider.add_flag_change_listener(lambda e: events3.append(e))
+
+        event = FlagChangeEvent(flag_key="test", timestamp="2024-01-01T00:00:00Z")
+        provider._handle_flag_change(event)
+
+        assert len(events1) == 1
+        assert len(events2) == 1
+        assert len(events3) == 1
+        provider.shutdown()
+
+
+# ========================================
+# Shutdown / Cleanup Tests
+# ========================================
+
+
+class TestShutdown:
+    """Test provider shutdown behavior."""
+
+    def test_shutdown_clears_state(self, mock_server: HTTPServer):
+        """After shutdown, provider is no longer initialized."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        assert provider._initialized is True
+
+        provider.shutdown()
+
+        assert provider._initialized is False
+
+    def test_shutdown_is_idempotent(self, mock_server: HTTPServer):
+        """Calling shutdown twice doesn't throw."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        provider.shutdown()
+        provider.shutdown()  # Should not raise
+
+
+# ========================================
+# Context Transformation Tests
+# ========================================
+
+
+class TestContextTransformation:
+    """Test context transformation to OFREP format."""
+
+    def test_targeting_key_only(self):
+        """Context with just targetingKey transforms correctly."""
+        provider = FlipswitchProvider(
+            api_key="test-key",
+            enable_realtime=False,
+        )
+
+        context = EvaluationContext(targeting_key="user-123")
+        result = provider._transform_context(context)
+
+        assert result["targetingKey"] == "user-123"
+        provider.shutdown()
+
+    def test_with_attributes(self):
+        """Context with additional attributes are included."""
+        provider = FlipswitchProvider(
+            api_key="test-key",
+            enable_realtime=False,
+        )
+
+        context = EvaluationContext(
+            targeting_key="user-123",
+            attributes={"email": "test@example.com", "plan": "premium"},
+        )
+        result = provider._transform_context(context)
+
+        assert result["targetingKey"] == "user-123"
+        assert result["email"] == "test@example.com"
+        assert result["plan"] == "premium"
+        provider.shutdown()
+
+    def test_empty_context(self):
+        """Empty context produces empty dict."""
+        provider = FlipswitchProvider(
+            api_key="test-key",
+            enable_realtime=False,
+        )
+
+        result = provider._transform_context(None)
+        assert result == {}
+
+        result = provider._transform_context(EvaluationContext())
+        assert isinstance(result, dict)
+        provider.shutdown()
+
+
+# ========================================
+# Type Inference Tests
+# ========================================
+
+
+class TestTypeInference:
+    """Test type inference logic."""
+
+    def setup_method(self):
+        self.provider = FlipswitchProvider(
+            api_key="test-key",
+            enable_realtime=False,
+        )
+
+    def teardown_method(self):
+        self.provider.shutdown()
+
+    def test_infer_boolean(self):
+        assert self.provider._infer_type(True) == "boolean"
+        assert self.provider._infer_type(False) == "boolean"
+
+    def test_infer_string(self):
+        assert self.provider._infer_type("hello") == "string"
+
+    def test_infer_integer(self):
+        assert self.provider._infer_type(42) == "integer"
+
+    def test_infer_float(self):
+        assert self.provider._infer_type(3.14) == "number"
+
+    def test_infer_null(self):
+        assert self.provider._infer_type(None) == "null"
+
+    def test_infer_object(self):
+        assert self.provider._infer_type({"key": "value"}) == "object"
+
+    def test_infer_array(self):
+        assert self.provider._infer_type([1, 2, 3]) == "array"
+
+    def test_metadata_override(self):
+        """getFlagType with metadata.flagType takes precedence."""
+        flag = {"value": None, "metadata": {"flagType": "boolean"}}
+        assert self.provider._get_flag_type(flag) == "boolean"
+
+    def test_metadata_decimal_maps_to_number(self):
+        """metadata.flagType 'decimal' maps to 'number'."""
+        flag = {"value": 3.14, "metadata": {"flagType": "decimal"}}
+        assert self.provider._get_flag_type(flag) == "number"
+
+
+# ========================================
+# Telemetry Headers Tests
+# ========================================
+
+
+class TestTelemetryHeaders:
+    """Test telemetry header generation."""
+
+    @staticmethod
+    def _get_header(headers: dict, name: str):
+        """Case-insensitive header lookup (werkzeug normalizes casing)."""
+        lower = name.lower()
+        for k, v in headers.items():
+            if k.lower() == lower:
+                return v
+        return None
+
+    def test_sdk_header(self, mock_server: HTTPServer):
+        """Request includes X-Flipswitch-SDK with correct format."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        # Make a request
+        mock_server.clear()
+        setup_bulk_response(mock_server, {"flags": []})
+        provider.evaluate_all_flags(EvaluationContext(targeting_key="user-1"))
+
+        requests = mock_server.log
+        assert len(requests) > 0
+        headers = dict(requests[-1][0].headers)
+        sdk_header = self._get_header(headers, "X-Flipswitch-SDK")
+        assert sdk_header is not None, f"X-Flipswitch-SDK not found in {list(headers.keys())}"
+        assert sdk_header.startswith("python/")
+        provider.shutdown()
+
+    def test_runtime_header(self, mock_server: HTTPServer):
+        """Request includes X-Flipswitch-Runtime header."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        mock_server.clear()
+        setup_bulk_response(mock_server, {"flags": []})
+        provider.evaluate_all_flags(EvaluationContext(targeting_key="user-1"))
+
+        requests = mock_server.log
+        headers = dict(requests[-1][0].headers)
+        runtime_header = self._get_header(headers, "X-Flipswitch-Runtime")
+        assert runtime_header is not None
+        assert runtime_header.startswith("python/")
+        provider.shutdown()
+
+    def test_os_header(self, mock_server: HTTPServer):
+        """Request includes X-Flipswitch-OS header."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        mock_server.clear()
+        setup_bulk_response(mock_server, {"flags": []})
+        provider.evaluate_all_flags(EvaluationContext(targeting_key="user-1"))
+
+        requests = mock_server.log
+        headers = dict(requests[-1][0].headers)
+        os_header = self._get_header(headers, "X-Flipswitch-OS")
+        assert os_header is not None, f"X-Flipswitch-OS not found in {list(headers.keys())}"
+        assert "/" in os_header
+        provider.shutdown()
+
+    def test_features_header(self, mock_server: HTTPServer):
+        """Request includes X-Flipswitch-Features with sse value."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server, enable_realtime=False)
+        provider.initialize(EvaluationContext())
+
+        mock_server.clear()
+        setup_bulk_response(mock_server, {"flags": []})
+        provider.evaluate_all_flags(EvaluationContext(targeting_key="user-1"))
+
+        requests = mock_server.log
+        headers = dict(requests[-1][0].headers)
+        features_header = self._get_header(headers, "X-Flipswitch-Features")
+        assert features_header == "sse=false"
+        provider.shutdown()
+
+
+# ========================================
+# Custom HTTP Client Tests
+# ========================================
+
+
+class TestCustomHttpClient:
+    """Test custom httpx.Client injection."""
+
+    def test_custom_client_is_used(self, mock_server: HTTPServer):
+        """Verify custom HTTP client is used for requests."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        custom_client = httpx.Client(timeout=5.0)
+
+        provider = FlipswitchProvider(
+            api_key="test-api-key",
+            base_url=mock_server.url_for(""),
+            enable_realtime=False,
+            http_client=custom_client,
+        )
+        provider.initialize(EvaluationContext())
+
+        # Provider should not own the client (won't close it)
+        assert provider._owns_http_client is False
+
+        provider.shutdown()
+
+        # Custom client should still be usable after provider shutdown
+        assert not custom_client.is_closed
+        custom_client.close()
