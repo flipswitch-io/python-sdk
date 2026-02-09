@@ -466,6 +466,57 @@ class TestReconnectionOnServerClose:
             client.close()
 
 
+class TestApiKeyRotatedNullValidUntil:
+    """Test api-key-rotated event with null validUntil."""
+
+    def test_api_key_rotated_null_valid_until_does_not_call_flag_change(self):
+        """api-key-rotated with null validUntil logs aborted, does NOT call on_flag_change."""
+        callback = MagicMock()
+        client = _make_client(on_flag_change=callback)
+
+        data = json.dumps({"validUntil": None, "timestamp": "2025-01-01T00:00:00Z"})
+        client._handle_event("api-key-rotated", data)
+
+        callback.assert_not_called()
+
+
+class TestStatusChangeCallbackError:
+    """Test that errors in the status change callback are caught."""
+
+    def test_status_change_callback_error_is_caught(self):
+        """An exception in on_status_change does not propagate."""
+
+        def bad_callback(status):
+            raise RuntimeError("callback exploded")
+
+        client = _make_client(on_status_change=bad_callback)
+
+        # Should not raise
+        client._update_status(ConnectionStatus.CONNECTED)
+
+        # Status should still be updated
+        assert client.get_status() == ConnectionStatus.CONNECTED
+
+
+class TestConnectNoOpWhenAlreadyConnected:
+    """Test that connect() is a no-op when already connected."""
+
+    def test_connect_is_noop_when_thread_alive(self):
+        """Calling connect() when _thread is alive does not start a second thread."""
+        client = _make_client()
+
+        # Simulate an alive thread
+        mock_thread = MagicMock()
+        mock_thread.is_alive.return_value = True
+        client._thread = mock_thread
+
+        # Should not start a new thread
+        client.connect()
+
+        # _thread should still be the mock (not replaced)
+        assert client._thread is mock_thread
+
+
 class TestErrorStatusOnNon200:
     """Integration: non-200 response sets status to ERROR."""
 

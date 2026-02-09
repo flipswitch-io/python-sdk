@@ -802,3 +802,295 @@ class TestCustomHttpClient:
         # Custom client should still be usable after provider shutdown
         assert not custom_client.is_closed
         custom_client.close()
+
+
+# ========================================
+# Resolve Delegation Tests
+# ========================================
+
+
+class TestResolveDelegation:
+    """Test that resolve_*_details methods delegate to the OFREP provider."""
+
+    def test_resolve_boolean_details(self, mock_server: HTTPServer):
+        """resolve_boolean_details delegates to OFREP provider."""
+        setup_bulk_response(mock_server, {"flags": []})
+        setup_flag_response(mock_server, "my-flag", {
+            "key": "my-flag", "value": True, "reason": "DEFAULT", "variant": "on",
+        })
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        result = provider.resolve_boolean_details("my-flag", False)
+        assert result is not None
+        assert result.value is True
+        provider.shutdown()
+
+    def test_resolve_string_details(self, mock_server: HTTPServer):
+        """resolve_string_details delegates to OFREP provider."""
+        setup_bulk_response(mock_server, {"flags": []})
+        setup_flag_response(mock_server, "my-flag", {
+            "key": "my-flag", "value": "hello", "reason": "DEFAULT", "variant": "v1",
+        })
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        result = provider.resolve_string_details("my-flag", "default")
+        assert result is not None
+        assert result.value == "hello"
+        provider.shutdown()
+
+    def test_resolve_integer_details(self, mock_server: HTTPServer):
+        """resolve_integer_details delegates to OFREP provider."""
+        setup_bulk_response(mock_server, {"flags": []})
+        setup_flag_response(mock_server, "my-flag", {
+            "key": "my-flag", "value": 42, "reason": "DEFAULT", "variant": "v1",
+        })
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        result = provider.resolve_integer_details("my-flag", 0)
+        assert result is not None
+        assert result.value == 42
+        provider.shutdown()
+
+    def test_resolve_float_details(self, mock_server: HTTPServer):
+        """resolve_float_details delegates to OFREP provider."""
+        setup_bulk_response(mock_server, {"flags": []})
+        setup_flag_response(mock_server, "my-flag", {
+            "key": "my-flag", "value": 3.14, "reason": "DEFAULT", "variant": "v1",
+        })
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        result = provider.resolve_float_details("my-flag", 0.0)
+        assert result is not None
+        assert result.value == 3.14
+        provider.shutdown()
+
+    def test_resolve_object_details(self, mock_server: HTTPServer):
+        """resolve_object_details delegates to OFREP provider."""
+        setup_bulk_response(mock_server, {"flags": []})
+        setup_flag_response(mock_server, "my-flag", {
+            "key": "my-flag", "value": {"nested": "data"}, "reason": "DEFAULT", "variant": "v1",
+        })
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        result = provider.resolve_object_details("my-flag", {})
+        assert result is not None
+        assert result.value == {"nested": "data"}
+        provider.shutdown()
+
+
+# ========================================
+# Error Path Tests
+# ========================================
+
+
+class TestErrorPaths:
+    """Test error handling in evaluate methods."""
+
+    def test_evaluate_all_flags_returns_empty_on_network_exception(self):
+        """evaluate_all_flags returns [] when httpx raises a network error."""
+        provider = FlipswitchProvider(
+            api_key="test-key",
+            base_url="http://127.0.0.1:1",  # Port 1 - connection refused
+            enable_realtime=False,
+        )
+
+        result = provider.evaluate_all_flags(EvaluationContext())
+        assert result == []
+        provider.shutdown()
+
+    def test_evaluate_flag_returns_none_on_network_exception(self):
+        """evaluate_flag returns None when httpx raises a network error."""
+        provider = FlipswitchProvider(
+            api_key="test-key",
+            base_url="http://127.0.0.1:1",  # Port 1 - connection refused
+            enable_realtime=False,
+        )
+
+        result = provider.evaluate_flag("some-flag", EvaluationContext())
+        assert result is None
+        provider.shutdown()
+
+
+# ========================================
+# Type Inference Edge Cases
+# ========================================
+
+
+class TestTypeInferenceEdgeCases:
+    """Test edge cases in type inference."""
+
+    def setup_method(self):
+        self.provider = FlipswitchProvider(
+            api_key="test-key",
+            enable_realtime=False,
+        )
+
+    def teardown_method(self):
+        self.provider.shutdown()
+
+    def test_infer_type_unknown_for_unsupported(self):
+        """_infer_type returns 'unknown' for unsupported types."""
+        assert self.provider._infer_type(set()) == "unknown"
+        assert self.provider._infer_type(object()) == "unknown"
+
+    def test_get_flag_type_integer_from_metadata(self):
+        """_get_flag_type returns 'integer' from metadata."""
+        flag = {"value": 42, "metadata": {"flagType": "integer"}}
+        assert self.provider._get_flag_type(flag) == "integer"
+
+    def test_get_flag_type_string_from_metadata(self):
+        """_get_flag_type returns 'string' from metadata."""
+        flag = {"value": "hello", "metadata": {"flagType": "string"}}
+        assert self.provider._get_flag_type(flag) == "string"
+
+
+# ========================================
+# SSE Lifecycle Tests
+# ========================================
+
+
+class TestSseLifecycle:
+    """Test SSE connection lifecycle."""
+
+    def test_initialize_starts_sse_when_realtime_enabled(self, mock_server: HTTPServer):
+        """SSE client is created when enable_realtime=True."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        # Setup SSE endpoint so it doesn't error out
+        mock_server.expect_request(
+            "/api/v1/flags/events",
+            method="GET",
+        ).respond_with_data(
+            "event: heartbeat\ndata: {}\n\n",
+            content_type="text/event-stream",
+        )
+
+        provider = FlipswitchProvider(
+            api_key="test-api-key",
+            base_url=mock_server.url_for(""),
+            enable_realtime=True,
+        )
+        provider.initialize(EvaluationContext())
+
+        assert provider._sse_client is not None
+        provider.shutdown()
+
+    def test_shutdown_closes_sse_client(self, mock_server: HTTPServer):
+        """shutdown() sets _sse_client to None."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        mock_server.expect_request(
+            "/api/v1/flags/events",
+            method="GET",
+        ).respond_with_data(
+            "event: heartbeat\ndata: {}\n\n",
+            content_type="text/event-stream",
+        )
+
+        provider = FlipswitchProvider(
+            api_key="test-api-key",
+            base_url=mock_server.url_for(""),
+            enable_realtime=True,
+        )
+        provider.initialize(EvaluationContext())
+
+        assert provider._sse_client is not None
+
+        provider.shutdown()
+
+        assert provider._sse_client is None
+
+    def test_reconnect_sse_is_noop_when_disabled(self):
+        """reconnect_sse() does nothing when realtime is disabled."""
+        provider = FlipswitchProvider(
+            api_key="test-key",
+            enable_realtime=False,
+        )
+
+        # Should not raise
+        provider.reconnect_sse()
+
+        assert provider._sse_client is None
+        provider.shutdown()
+
+    def test_get_sse_status_returns_client_status(self, mock_server: HTTPServer):
+        """get_sse_status returns the SSE client's status when available."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        mock_server.expect_request(
+            "/api/v1/flags/events",
+            method="GET",
+        ).respond_with_data(
+            "event: heartbeat\ndata: {}\n\n",
+            content_type="text/event-stream",
+        )
+
+        provider = FlipswitchProvider(
+            api_key="test-api-key",
+            base_url=mock_server.url_for(""),
+            enable_realtime=True,
+        )
+        provider.initialize(EvaluationContext())
+
+        # SSE client exists, so status should come from it
+        status = provider.get_sse_status()
+        assert isinstance(status, ConnectionStatus)
+        provider.shutdown()
+
+
+# ========================================
+# Polling Internal Tests
+# ========================================
+
+
+class TestPollingInternals:
+    """Test internal polling methods."""
+
+    def test_poll_flags_does_not_crash(self, mock_server: HTTPServer):
+        """_poll_flags runs without error and schedules next poll."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = FlipswitchProvider(
+            api_key="test-api-key",
+            base_url=mock_server.url_for(""),
+            enable_realtime=False,
+            enable_polling_fallback=True,
+            polling_interval=100.0,  # Long interval so timer doesn't fire
+        )
+        provider.initialize(EvaluationContext())
+
+        # Activate polling
+        provider._polling_active = True
+        provider._poll_flags()
+
+        # Should have scheduled the next poll
+        assert provider._polling_timer is not None
+        provider.shutdown()
+
+    def test_poll_flags_noop_when_not_active(self, mock_server: HTTPServer):
+        """_poll_flags returns immediately when polling is not active."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = FlipswitchProvider(
+            api_key="test-api-key",
+            base_url=mock_server.url_for(""),
+            enable_realtime=False,
+        )
+        provider.initialize(EvaluationContext())
+
+        # Polling is not active
+        provider._poll_flags()
+
+        # No timer should have been scheduled
+        assert provider._polling_timer is None
+        provider.shutdown()
