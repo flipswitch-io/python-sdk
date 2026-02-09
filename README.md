@@ -1,4 +1,4 @@
-# Flipswitch Python SDK
+# Flipswitch Python SDK 
 
 [![CI](https://github.com/flipswitch-io/python-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/flipswitch-io/python-sdk/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/flipswitch-sdk.svg)](https://pypi.org/project/flipswitch-sdk/)
