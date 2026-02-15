@@ -105,27 +105,20 @@ show_feature = client.get_boolean_value("new-feature", False, context)
 Listen for flag changes:
 
 ```python
-from flipswitch import FlipswitchProvider
-from flipswitch.types import FlagChangeEvent, ConnectionStatus
-
-def on_flag_change(event: FlagChangeEvent):
-    if event.flag_key:
-        print(f"Flag changed: {event.flag_key}")
-    else:
-        print("All flags invalidated")
-
 provider = FlipswitchProvider(api_key="your-api-key")
-provider.add_flag_change_listener(on_flag_change)
 
-# Check SSE status
-status = provider.get_sse_status()
-# ConnectionStatus.CONNECTING | CONNECTED | DISCONNECTED | ERROR
+# Listen for all flag changes (flag_key is None for bulk invalidation)
+provider.add_flag_change_listener(lambda e: print(f"Flag changed: {e.flag_key}"))
 
-# Force reconnect
-provider.reconnect_sse()
+# Listen for a specific flag (also fires on bulk invalidation)
+unsub = provider.add_flag_change_listener(
+    lambda e: print("dark-mode changed, re-evaluating..."),
+    flag_key="dark-mode",
+)
+unsub()  # stop listening
 
-# Remove listener when done
-provider.remove_flag_change_listener(on_flag_change)
+provider.get_sse_status()  # current status
+provider.reconnect_sse()   # force reconnect
 ```
 
 ### Bulk Flag Evaluation
