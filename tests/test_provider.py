@@ -1156,3 +1156,190 @@ class TestPollingInternals:
         # No timer should have been scheduled
         assert provider._polling_timer is None
         provider.shutdown()
+
+
+# ========================================
+# Flag-Key-Specific Listener Tests
+# ========================================
+
+
+class TestFlagKeySpecificListeners:
+    """Test flag-key-specific listener management and dispatch."""
+
+    def test_key_listener_fires_on_matching_key(self, mock_server: HTTPServer):
+        """Key-specific listener fires when flag key matches."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        events = []
+        provider.add_flag_change_listener(lambda e: events.append(e), flag_key="dark-mode")
+
+        event = FlagChangeEvent(flag_key="dark-mode", timestamp="2024-01-01T00:00:00Z")
+        provider._handle_flag_change(event)
+
+        assert len(events) == 1
+        assert events[0].flag_key == "dark-mode"
+        provider.shutdown()
+
+    def test_key_listener_does_not_fire_on_non_matching_key(self, mock_server: HTTPServer):
+        """Key-specific listener does NOT fire for a different flag key."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        events = []
+        provider.add_flag_change_listener(lambda e: events.append(e), flag_key="dark-mode")
+
+        event = FlagChangeEvent(flag_key="other-flag", timestamp="2024-01-01T00:00:00Z")
+        provider._handle_flag_change(event)
+
+        assert len(events) == 0
+        provider.shutdown()
+
+    def test_key_listener_fires_on_bulk_invalidation(self, mock_server: HTTPServer):
+        """Key-specific listener fires on bulk invalidation (null flag_key)."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        events = []
+        provider.add_flag_change_listener(lambda e: events.append(e), flag_key="dark-mode")
+
+        event = FlagChangeEvent(flag_key=None, timestamp="2024-01-01T00:00:00Z")
+        provider._handle_flag_change(event)
+
+        assert len(events) == 1
+        assert events[0].flag_key is None
+        provider.shutdown()
+
+    def test_unsubscribe_removes_key_listener(self, mock_server: HTTPServer):
+        """Calling the returned unsubscribe function removes the listener."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        events = []
+        unsub = provider.add_flag_change_listener(lambda e: events.append(e), flag_key="dark-mode")
+
+        event = FlagChangeEvent(flag_key="dark-mode", timestamp="2024-01-01T00:00:00Z")
+        provider._handle_flag_change(event)
+        assert len(events) == 1
+
+        unsub()
+
+        provider._handle_flag_change(event)
+        assert len(events) == 1  # still 1 - unsubscribed
+        provider.shutdown()
+
+    def test_unsubscribe_removes_global_listener(self, mock_server: HTTPServer):
+        """Global listener unsubscribe works."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        events = []
+        unsub = provider.add_flag_change_listener(lambda e: events.append(e))
+
+        event = FlagChangeEvent(flag_key="test", timestamp="2024-01-01T00:00:00Z")
+        provider._handle_flag_change(event)
+        assert len(events) == 1
+
+        unsub()
+
+        provider._handle_flag_change(event)
+        assert len(events) == 1
+        provider.shutdown()
+
+    def test_multiple_listeners_for_same_key(self, mock_server: HTTPServer):
+        """Multiple listeners for the same key all fire."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        events1 = []
+        events2 = []
+        provider.add_flag_change_listener(lambda e: events1.append(e), flag_key="dark-mode")
+        provider.add_flag_change_listener(lambda e: events2.append(e), flag_key="dark-mode")
+
+        event = FlagChangeEvent(flag_key="dark-mode", timestamp="2024-01-01T00:00:00Z")
+        provider._handle_flag_change(event)
+
+        assert len(events1) == 1
+        assert len(events2) == 1
+        provider.shutdown()
+
+    def test_key_listener_exception_isolated(self, mock_server: HTTPServer):
+        """One key listener throwing doesn't prevent others from firing."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        events = []
+
+        def bad_listener(event):
+            raise RuntimeError("boom")
+
+        provider.add_flag_change_listener(bad_listener, flag_key="dark-mode")
+        provider.add_flag_change_listener(lambda e: events.append(e), flag_key="dark-mode")
+
+        event = FlagChangeEvent(flag_key="dark-mode", timestamp="2024-01-01T00:00:00Z")
+        provider._handle_flag_change(event)
+
+        assert len(events) == 1
+        provider.shutdown()
+
+    def test_remove_flag_change_listener_by_key(self, mock_server: HTTPServer):
+        """remove_flag_change_listener with flag_key removes the correct listener."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        events = []
+
+        def listener(event):
+            events.append(event)
+
+        provider.add_flag_change_listener(listener, flag_key="dark-mode")
+        provider.remove_flag_change_listener(listener, flag_key="dark-mode")
+
+        event = FlagChangeEvent(flag_key="dark-mode", timestamp="2024-01-01T00:00:00Z")
+        provider._handle_flag_change(event)
+
+        assert len(events) == 0
+        provider.shutdown()
+
+    def test_global_and_key_listeners_both_fire(self, mock_server: HTTPServer):
+        """Global and key-specific listeners both fire on matching event."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        global_events = []
+        key_events = []
+
+        provider.add_flag_change_listener(lambda e: global_events.append(e))
+        provider.add_flag_change_listener(lambda e: key_events.append(e), flag_key="dark-mode")
+
+        event = FlagChangeEvent(flag_key="dark-mode", timestamp="2024-01-01T00:00:00Z")
+        provider._handle_flag_change(event)
+
+        assert len(global_events) == 1
+        assert len(key_events) == 1
+
+        # Non-matching key: only global fires
+        event2 = FlagChangeEvent(flag_key="other", timestamp="2024-01-01T00:00:00Z")
+        provider._handle_flag_change(event2)
+
+        assert len(global_events) == 2
+        assert len(key_events) == 1
+        provider.shutdown()

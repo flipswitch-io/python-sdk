@@ -102,6 +102,8 @@ class FlipswitchProvider(AbstractProvider):
         self._polling_lock = threading.Lock()
 
         self._flag_change_listeners: List[Callable[[FlagChangeEvent], None]] = []
+        self._key_flag_change_listeners: Dict[str, List[Callable[[FlagChangeEvent], None]]] = {}
+        self._listener_lock = threading.Lock()
         self._sse_client: Optional[SseClient] = None
         self._initialized = False
 
@@ -324,8 +326,26 @@ class FlipswitchProvider(AbstractProvider):
         else:
             self.emit_provider_configuration_changed(ProviderEventDetails())
 
-        # Notify user-registered listeners
+        # Notify global listeners
         for listener in self._flag_change_listeners:
+            try:
+                listener(event)
+            except Exception as e:
+                logger.error(f"Error in flag change listener: {e}")
+
+        # Notify key-specific listeners
+        with self._listener_lock:
+            if event.flag_key is not None:
+                # Targeted change — fire only matching key listeners
+                listeners = self._key_flag_change_listeners.get(event.flag_key, [])
+                listeners = list(listeners)  # snapshot
+            else:
+                # Bulk invalidation — fire ALL key-specific listeners
+                listeners = []
+                for key_listeners in self._key_flag_change_listeners.values():
+                    listeners.extend(key_listeners)
+
+        for listener in listeners:
             try:
                 listener(event)
             except Exception as e:
@@ -355,17 +375,67 @@ class FlipswitchProvider(AbstractProvider):
             logger.info("SSE connection restored")
 
     def add_flag_change_listener(
-        self, listener: Callable[[FlagChangeEvent], None]
-    ) -> None:
-        """Add a listener for flag change events."""
-        self._flag_change_listeners.append(listener)
+        self,
+        listener: Callable[[FlagChangeEvent], None],
+        *,
+        flag_key: Optional[str] = None,
+    ) -> Callable[[], None]:
+        """Add a listener for flag change events.
+
+        Args:
+            listener: The callback to invoke on flag changes.
+            flag_key: If provided, the listener only fires for changes to this
+                specific flag key (and on bulk invalidations with null flag_key).
+
+        Returns:
+            A callable that removes the listener when called.
+        """
+        if flag_key is not None:
+            with self._listener_lock:
+                if flag_key not in self._key_flag_change_listeners:
+                    self._key_flag_change_listeners[flag_key] = []
+                self._key_flag_change_listeners[flag_key].append(listener)
+
+            def unsubscribe() -> None:
+                with self._listener_lock:
+                    listeners = self._key_flag_change_listeners.get(flag_key)
+                    if listeners and listener in listeners:
+                        listeners.remove(listener)
+                        if not listeners:
+                            del self._key_flag_change_listeners[flag_key]
+
+            return unsubscribe
+        else:
+            self._flag_change_listeners.append(listener)
+
+            def unsubscribe() -> None:
+                if listener in self._flag_change_listeners:
+                    self._flag_change_listeners.remove(listener)
+
+            return unsubscribe
 
     def remove_flag_change_listener(
-        self, listener: Callable[[FlagChangeEvent], None]
+        self,
+        listener: Callable[[FlagChangeEvent], None],
+        *,
+        flag_key: Optional[str] = None,
     ) -> None:
-        """Remove a flag change listener."""
-        if listener in self._flag_change_listeners:
-            self._flag_change_listeners.remove(listener)
+        """Remove a flag change listener.
+
+        Args:
+            listener: The listener to remove.
+            flag_key: If provided, removes from the key-specific listener list.
+        """
+        if flag_key is not None:
+            with self._listener_lock:
+                listeners = self._key_flag_change_listeners.get(flag_key)
+                if listeners and listener in listeners:
+                    listeners.remove(listener)
+                    if not listeners:
+                        del self._key_flag_change_listeners[flag_key]
+        else:
+            if listener in self._flag_change_listeners:
+                self._flag_change_listeners.remove(listener)
 
     def get_sse_status(self) -> ConnectionStatus:
         """Get SSE connection status."""
