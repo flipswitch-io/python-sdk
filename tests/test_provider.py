@@ -18,6 +18,7 @@ import httpx
 from pytest_httpserver import HTTPServer
 
 from openfeature.evaluation_context import EvaluationContext
+from openfeature.event import ProviderEvent, ProviderEventDetails
 
 from flipswitch import FlipswitchProvider, ConnectionStatus
 from flipswitch.types import FlagChangeEvent
@@ -542,6 +543,67 @@ class TestFlagChangeHandling:
         assert len(events1) == 1
         assert len(events2) == 1
         assert len(events3) == 1
+        provider.shutdown()
+
+
+# ========================================
+# Flag Change Event Details Tests
+# ========================================
+
+
+class TestFlagChangeEventDetails:
+    """Tests for OpenFeature PROVIDER_CONFIGURATION_CHANGED event emission."""
+
+    def test_flag_updated_emits_configuration_changed_with_flag_key(self, mock_server: HTTPServer):
+        """flag-updated event should emit PROVIDER_CONFIGURATION_CHANGED with flags_changed."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        emitted_events = []
+
+        def on_emit(provider_ref, event, details):
+            emitted_events.append((event, details))
+
+        provider.attach(on_emit)
+
+        event = FlagChangeEvent(flag_key="my-feature", timestamp="2024-01-01T00:00:00Z")
+        provider._handle_flag_change(event)
+
+        config_events = [
+            (e, d) for e, d in emitted_events
+            if e == ProviderEvent.PROVIDER_CONFIGURATION_CHANGED
+        ]
+        assert len(config_events) == 1
+        _, details = config_events[0]
+        assert details.flags_changed == ["my-feature"]
+        provider.shutdown()
+
+    def test_config_updated_emits_configuration_changed_without_flag_key(self, mock_server: HTTPServer):
+        """config-updated event should emit PROVIDER_CONFIGURATION_CHANGED with empty flags_changed."""
+        setup_bulk_response(mock_server, {"flags": []})
+
+        provider = create_provider(mock_server)
+        provider.initialize(EvaluationContext())
+
+        emitted_events = []
+
+        def on_emit(provider_ref, event, details):
+            emitted_events.append((event, details))
+
+        provider.attach(on_emit)
+
+        event = FlagChangeEvent(flag_key=None, timestamp="2024-01-01T00:00:00Z")
+        provider._handle_flag_change(event)
+
+        config_events = [
+            (e, d) for e, d in emitted_events
+            if e == ProviderEvent.PROVIDER_CONFIGURATION_CHANGED
+        ]
+        assert len(config_events) == 1
+        _, details = config_events[0]
+        assert details.flags_changed is None
         provider.shutdown()
 
 

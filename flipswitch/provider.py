@@ -15,6 +15,7 @@ from openfeature.exception import (
     OpenFeatureError,
 )
 from openfeature.flag_evaluation import FlagResolutionDetails, Reason
+from openfeature.event import ProviderEventDetails
 from openfeature.provider import AbstractProvider, Metadata
 from openfeature.contrib.provider.ofrep import OFREPProvider
 
@@ -314,6 +315,14 @@ class FlipswitchProvider(AbstractProvider):
         except Exception as e:
             # Log but don't fail - stale data is still usable
             logger.warning(f"Failed to refresh flags after SSE event: {e}")
+
+        # Emit OpenFeature configuration changed event
+        if event.flag_key is not None:
+            self.emit_provider_configuration_changed(
+                ProviderEventDetails(flags_changed=[event.flag_key])
+            )
+        else:
+            self.emit_provider_configuration_changed(ProviderEventDetails())
 
         # Notify user-registered listeners
         for listener in self._flag_change_listeners:
