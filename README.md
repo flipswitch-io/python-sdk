@@ -3,6 +3,8 @@
 [![CI](https://github.com/flipswitch-io/python-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/flipswitch-io/python-sdk/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/flipswitch-sdk.svg)](https://pypi.org/project/flipswitch-sdk/)
 [![codecov](https://codecov.io/gh/flipswitch-io/python-sdk/branch/main/graph/badge.svg)](https://codecov.io/gh/flipswitch-io/python-sdk)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![OpenFeature](https://img.shields.io/badge/OpenFeature-compatible-blue)](https://openfeature.dev)
 
 Flipswitch SDK for Python with real-time SSE support for OpenFeature.
 
